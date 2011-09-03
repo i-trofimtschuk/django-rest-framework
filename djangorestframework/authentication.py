@@ -10,6 +10,8 @@ The set of authentication methods which are used is then specified by setting th
 from django.contrib.auth import authenticate
 from django.middleware.csrf import CsrfViewMiddleware
 from djangorestframework.utils import as_tuple
+from djangorestframework.response import ErrorResponse
+from djangorestframework import status
 import base64
 
 __all__ = (
@@ -46,11 +48,24 @@ class BaseAuthentication(object):
         """
         return None
 
-
 class BasicAuthentication(BaseAuthentication):
     """
     Use HTTP Basic authentication.
     """
+    realm = 'restapi'
+
+    def __init__(self, *args, **kwargs):
+        self._401_UNAUTHORIZED_RESPONSE = ErrorResponse(
+            status.HTTP_401_UNAUTHORIZED,
+            {'detail': 'You do not have permission to access this resource. ' +
+                   'You may need to login or otherwise authenticate the request.'},
+            headers = {'WWW-Authenticate': 'Basic Realm="%s"' % self.realm })
+        self._400_BAD_REQUEST_AUTHERROR = ErrorResponse(
+                status.HTTP_400_BAD_REQUEST,
+                {'detail':  'The Request sent by your browser was not understandable for the server.' +
+                            'Specifically the error was in the HTTP Basic Authentication mechanism.'},
+                )
+        return super(BasicAuthentication, self).__init__(*args, **kwargs)
 
     def authenticate(self, request):
         """
@@ -65,18 +80,18 @@ class BasicAuthentication(BaseAuthentication):
                 try:
                     auth_parts = base64.b64decode(auth[1]).partition(':')
                 except TypeError:
-                    return None
+                    raise self._400_BAD_REQUEST_AUTHERROR
                 
                 try:
                     uname, passwd = smart_unicode(auth_parts[0]), smart_unicode(auth_parts[2])
                 except DjangoUnicodeDecodeError:
-                    return None
+                    raise self._400_BAD_REQUEST_AUTHERROR
                     
                 user = authenticate(username=uname, password=passwd)
                 if user is not None and user.is_active:
                     return user
-        return None
-                
+        raise self._401_UNAUTHORIZED_RESPONSE
+
 
 class UserLoggedInAuthentication(BaseAuthentication):
     """
